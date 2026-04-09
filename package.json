@@ -1,0 +1,11 @@
+{
+  "name": "vwaverfidprinter",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Virtual Printronix T800 RFID printer — ZPL over TCP with web preview",
+  "main": "src/server.js",
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.17.0"
+  }
+}
