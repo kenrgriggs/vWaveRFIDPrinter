@@ -1,10 +1,10 @@
 # vWaveRFIDPrinter
 
-A virtual Printronix T800 RFID printer that runs in Docker. Accepts ZPL print jobs over TCP, renders the label as an image, and displays everything in a browser UI — useful for developing and testing WaveRFIDPrintAgent without needing a physical printer.
+A virtual ZPL printer that runs in Docker. Any app that sends ZPL over a raw TCP connection can target it — jobs are captured, parsed, and displayed in a browser UI with a rendered label preview.
 
 ## What it does
 
-- Listens on **TCP :9100** for raw ZPL print jobs (same port as a real Printronix T800)
+- Listens on **TCP :9100** for raw ZPL print jobs
 - Parses each job for label dimensions, RFID write data, field text, and quantity
 - Renders the label to a PNG using the [Labelary API](http://labelary.com) (requires internet)
 - Streams job arrivals and log entries to the browser in real time over WebSocket
@@ -113,4 +113,4 @@ const c = net.createConnection(9100, '127.0.0.1', () => { c.write(zpl); c.end();
 4. ZPL is POSTed to Labelary asynchronously; the rendered PNG is broadcast when it arrives
 5. Browser updates the job status and swaps in the image without a page reload
 
-The TCP connection itself requires no handshake or acknowledgment — the client can connect, send, and disconnect immediately, matching how real RAW print ports work.
+The TCP connection requires no handshake or acknowledgment — the client can connect, send, and disconnect immediately, matching how raw TCP print ports work.
