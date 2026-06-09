@@ -8,7 +8,8 @@ const path    = require('path');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const TCP_PORT    = parseInt(process.env.TCP_PORT    || '9100');
+const TCP_PORT    = parseInt(process.env.TCP_PORT    || '9100');  // network (IP) print path
+const USB_PORT    = parseInt(process.env.USB_PORT    || '9103');  // USB-capture path (Windows spooler loops back here). NOT 9101 — the agent owns 9101.
 const HTTP_PORT   = parseInt(process.env.HTTP_PORT   || '8080');
 const DPMM        = parseInt(process.env.DPMM        || '8');    // 8dpmm = 203dpi
 const LABELARY    = process.env.LABELARY_URL || 'http://api.labelary.com';
@@ -53,11 +54,16 @@ function parseZPL(zpl) {
   // Dimensions from ZPL commands
   const pwMatch = zpl.match(/\^PW(\d+)/i);
   const llMatch = zpl.match(/\^LL(\d+)/i);
+  // ^ML sets max label length in inches (integer); use as height fallback when ^LL is absent
+  const mlMatch = zpl.match(/\^ML(\d+)/i);
   const printWidthDots  = pwMatch ? parseInt(pwMatch[1]) : null;
   const labelLengthDots = llMatch ? parseInt(llMatch[1]) : null;
+  const maxLabelInches  = mlMatch ? parseInt(mlMatch[1]) : null;
 
   let widthInches  = printWidthDots  ? parseFloat((printWidthDots  / DPI).toFixed(3)) : 4;
-  let heightInches = labelLengthDots ? parseFloat((labelLengthDots / DPI).toFixed(3)) : 6;
+  let heightInches = labelLengthDots
+    ? parseFloat((labelLengthDots / DPI).toFixed(3))
+    : (maxLabelInches ?? 6);
 
   // Clamp to sane values for Labelary
   widthInches  = Math.min(Math.max(widthInches,  0.5), 15);
@@ -131,11 +137,12 @@ async function renderZPL(zpl, meta) {
 
 // ─── Job Processing ───────────────────────────────────────────────────────────
 
-async function processJob(zpl, clientAddr) {
+async function processJob(zpl, clientAddr, source) {
   const id = ++jobCounter;
   const meta = parseZPL(zpl);
 
-  const job = { id, ts: new Date().toISOString(), clientAddr, zpl, meta, status: 'rendering', image: null };
+  // source: 'USB' (came in on the spooler-capture port) or 'IP' (raw network TCP)
+  const job = { id, ts: new Date().toISOString(), source, clientAddr, zpl, meta, status: 'rendering', image: null };
 
   jobs.unshift(job);
   if (jobs.length > MAX_JOBS) jobs.pop();
@@ -143,7 +150,7 @@ async function processJob(zpl, clientAddr) {
   const rfidNote = meta.rfidData
     ? ` | RFID(${meta.rfidFormat}): ${meta.rfidData}`
     : '';
-  log('info', `Job #${id} from ${clientAddr} | ${zpl.length} bytes | ${meta.widthInches}"×${meta.heightInches}"${rfidNote}`);
+  log('info', `Job #${id} [${source}] from ${clientAddr} | ${zpl.length} bytes | ${meta.widthInches}"×${meta.heightInches}"${rfidNote}`);
 
   broadcast('job', jobView(job));
 
@@ -165,37 +172,48 @@ function jobView(job) {
   return { ...rest, zplLength: zpl.length };
 }
 
-// ─── TCP Server ───────────────────────────────────────────────────────────────
+// ─── TCP Servers ──────────────────────────────────────────────────────────────
+//
+// Two listeners, identical parsing, different transport label:
+//   :9100 → 'IP'   — raw network print jobs (agent opens a TCP socket directly)
+//   :9101 → 'USB'  — the Windows print spooler's capture queue loops raw ZPL here,
+//                    so jobs the agent sent "over USB" (winspool RAW) show up tagged USB.
+// Both feed the same job pipeline; only the source badge differs in the UI.
 
-const tcpServer = net.createServer((socket) => {
-  const client = `${socket.remoteAddress}:${socket.remotePort}`;
-  log('info', `TCP connect: ${client}`);
+function makePrintServer(source) {
+  return net.createServer((socket) => {
+    const client = `${socket.remoteAddress}:${socket.remotePort}`;
+    log('info', `[${source}] connect: ${client}`);
 
-  let buffer = '';
+    let buffer = '';
 
-  socket.on('data', (chunk) => {
-    buffer += chunk.toString('utf8');
-    log('debug', `${chunk.length} bytes from ${client}`);
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString('utf8');
+      log('debug', `[${source}] ${chunk.length} bytes from ${client}`);
 
-    // Extract complete ^XA...^XZ jobs — one connection may send multiple
-    while (true) {
-      const start = buffer.search(/\^XA/i);
-      if (start === -1) { buffer = ''; break; }       // No job start — discard preamble
+      // Extract complete ^XA...^XZ jobs — one connection may send multiple
+      while (true) {
+        const start = buffer.search(/\^XA/i);
+        if (start === -1) { buffer = ''; break; }       // No job start — discard preamble
 
-      const end = buffer.search(/\^XZ/i);
-      if (end === -1) break;                           // Incomplete job — wait for more data
+        const end = buffer.search(/\^XZ/i);
+        if (end === -1) break;                           // Incomplete job — wait for more data
 
-      const zpl = buffer.substring(start, end + 3);   // inclusive of ^XZ
-      buffer = buffer.substring(end + 3);
+        const zpl = buffer.substring(start, end + 3);   // inclusive of ^XZ
+        buffer = buffer.substring(end + 3);
 
-      // Kick off async, don't block the TCP read loop
-      processJob(zpl, client).catch(err => log('error', `processJob: ${err.message}`));
-    }
+        // Kick off async, don't block the TCP read loop
+        processJob(zpl, client, source).catch(err => log('error', `processJob: ${err.message}`));
+      }
+    });
+
+    socket.on('end',   () => log('info',  `[${source}] disconnect: ${client}`));
+    socket.on('error', (err) => log('error', `[${source}] socket [${client}]: ${err.message}`));
   });
+}
 
-  socket.on('end',   () => log('info',  `TCP disconnect: ${client}`));
-  socket.on('error', (err) => log('error', `Socket [${client}]: ${err.message}`));
-});
+const tcpServer = makePrintServer('IP');
+const usbServer = makePrintServer('USB');
 
 // ─── HTTP / REST ──────────────────────────────────────────────────────────────
 
@@ -237,7 +255,11 @@ wss.on('connection', (ws, req) => {
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 tcpServer.listen(TCP_PORT, '0.0.0.0', () =>
-  log('info', `TCP print server ready on 0.0.0.0:${TCP_PORT}`)
+  log('info', `IP print server ready on 0.0.0.0:${TCP_PORT}`)
+);
+
+usbServer.listen(USB_PORT, '0.0.0.0', () =>
+  log('info', `USB-capture print server ready on 0.0.0.0:${USB_PORT}`)
 );
 
 httpServer.listen(HTTP_PORT, '0.0.0.0', () =>

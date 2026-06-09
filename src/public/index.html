@@ -311,6 +311,19 @@
     .badge-rendering    { background: rgba(88,166,255,.15);  color: var(--accent); }
     .badge-render_failed{ background: rgba(248,81,73,.15);   color: var(--red);    }
 
+    /* Transport source badges (USB vs IP) */
+    .src {
+      font-size: 9px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+      font-weight: 700;
+      letter-spacing: .5px;
+      font-family: monospace;
+    }
+    .src-USB { background: rgba(188,140,255,.16); color: var(--purple); border: 1px solid rgba(188,140,255,.35); }
+    .src-IP  { background: rgba(88,166,255,.12);  color: var(--accent); border: 1px solid rgba(88,166,255,.30); }
+
     /* ─── Log pane ───────────────────────────────────────────────────────── */
 
     .log-scroll {
@@ -353,7 +366,8 @@
   <header>
     <div class="status-dot" id="statusDot"></div>
     <div class="logo">vWaveRFIDPrinter</div>
-    <div class="pill">TCP :9100</div>
+    <div class="pill">IP :9100</div>
+    <div class="pill" style="background:rgba(188,140,255,.08);border-color:rgba(188,140,255,.25);color:var(--purple);">USB :9103</div>
     <div class="pill" id="pillJobs">Jobs: 0</div>
     <div class="spacer"></div>
     <button class="btn" onclick="clearAll()">Clear All</button>
@@ -370,7 +384,7 @@
       </div>
       <div class="preview-scroll" id="previewArea">
         <div class="label-frame" id="labelFrame">
-          <div class="placeholder">No jobs yet.<br>Send a ZPL print job to <strong>TCP :9100</strong>.</div>
+          <div class="placeholder">No jobs yet.<br>Send a ZPL print job to <strong>IP :9100</strong> or the <strong>USB :9103</strong> capture queue.</div>
         </div>
         <div id="metaArea"></div>
       </div>
@@ -461,7 +475,7 @@
     jobs = []; selectedId = null; totalJobs = 0; zplOpen = false;
     $jobs.innerHTML = '<div class="empty-msg">Waiting for print jobs&hellip;</div>';
     $log.innerHTML  = '';
-    $frame.innerHTML = '<div class="placeholder">No jobs yet.<br>Send a ZPL print job to <strong>TCP :9100</strong>.</div>';
+    $frame.innerHTML = '<div class="placeholder">No jobs yet.<br>Send a ZPL print job to <strong>IP :9100</strong> or the <strong>USB :9103</strong> capture queue.</div>';
     $meta.innerHTML  = '';
     $badge.textContent = '';
     $pillJobs.textContent = 'Jobs: 0';
@@ -490,6 +504,7 @@
       <div class="job-row ${j.id === selectedId ? 'active' : ''} ${j.id === flashId ? 'new-flash' : ''}"
            data-id="${j.id}" onclick="selectJob(${j.id})">
         <span class="job-num">#${j.id}</span>
+        <span class="src src-${j.source === 'USB' ? 'USB' : 'IP'}">${esc(j.source || 'IP')}</span>
         <span class="job-time">${fmtTime(j.ts)}</span>
         <span class="job-addr">${esc(j.clientAddr)}</span>
         ${j.meta.rfidData
@@ -566,8 +581,8 @@
           <div class="meta-val">${fmtTimeFull(job.ts)}</div>
         </div>
         <div class="meta-card">
-          <div class="meta-key">Client IP</div>
-          <div class="meta-val">${esc(job.clientAddr)}</div>
+          <div class="meta-key">Source</div>
+          <div class="meta-val"><span class="src src-${job.source === 'USB' ? 'USB' : 'IP'}">${esc(job.source || 'IP')}</span> &nbsp;${esc(job.clientAddr)}</div>
         </div>
         <div class="meta-card">
           <div class="meta-key">Label Size</div>

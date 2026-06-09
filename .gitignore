@@ -1,3 +1,14 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Logs
+*.log
+*.log.old
+
+# Local env / overrides
 .env
 *.env.local
 docker-compose.override.yml

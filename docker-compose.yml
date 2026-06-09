@@ -4,10 +4,12 @@ services:
     image: vwaverfidprinter
     container_name: vWaveRFIDPrinter
     ports:
-      - "9100:9100"   # RAW TCP print jobs (point your WaveRFIDPrintAgent here)
+      - "9100:9100"   # RAW TCP print jobs — network/IP path (point a network printer agent here)
+      - "9103:9103"   # USB-capture path — Windows spooler queue loops back here (tagged USB)
       - "8080:8080"   # Web UI
     environment:
       - TCP_PORT=9100
+      - USB_PORT=9103   # NOT 9101 — the print agent owns 9101 (its HTTPS Zebra API)
       - HTTP_PORT=8080
       - DPMM=8                                        # 8dpmm = 203 DPI (Printronix T800 default)
       - LABELARY_URL=http://api.labelary.com          # ZPL renderer — needs internet access
